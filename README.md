@@ -98,7 +98,3 @@ cargo add tokio reqwest csv serde serde_json tokio-util futures-util
 
 ## 📜 License  
 This project is licensed under the **MIT License**.  
-
----
-
-This **README** provides an overview, setup instructions, and usage details. Let me know if you need any changes! 🚀
