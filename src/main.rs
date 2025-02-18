@@ -1,5 +1,5 @@
-use csv::ReaderBuilder;
-use reqwest::Client;
+use csv::{Reader, ReaderBuilder};
+use reqwest::{Client, Response};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{create_dir_all, File};
@@ -36,20 +36,20 @@ struct ImageEntry {
 }
 
 async fn download_file(url: &str, local_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let client = Client::new();
-    let response = client.get(url).send().await?;
+    let client: Client = Client::new();
+    let response: Response = client.get(url).send().await?;
     let bytes = response.bytes().await?;
-    let mut file = File::create(local_path)?;
+    let mut file: File = File::create(local_path)?;
     file.write_all(&bytes)?;
     Ok(())
 }
 
 async fn load_images() -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
-    let mut rdr = ReaderBuilder::new()
+    let mut rdr: Reader<File> = ReaderBuilder::new()
         .has_headers(false)
         .from_path(LOCAL_TOURIST_BEACON_IMGS_CSV)?;
 
-    let mut images = HashMap::new();
+    let mut images: HashMap<String, String> = HashMap::new();
 
     for result in rdr.deserialize() {
         let record: ImageEntry = result?;
@@ -59,13 +59,13 @@ async fn load_images() -> Result<HashMap<String, String>, Box<dyn std::error::Er
 }
 
 async fn generate_beacon_json() -> Result<(), Box<dyn std::error::Error>> {
-    let mut rdr = ReaderBuilder::new()
+    let mut rdr: Reader<File> = ReaderBuilder::new()
         .has_headers(true)
         .from_path(LOCAL_TOURIST_BEACON_CSV)?;
 
-    let images = load_images().await?;
-    let now = chrono::Utc::now().to_rfc3339();
-    let mut beacons = Vec::new();
+    let images: HashMap<String, String> = load_images().await?;
+    let now: String = chrono::Utc::now().to_rfc3339();
+    let mut beacons: Vec<TouristBeacon> = Vec::new();
 
     for result in rdr.deserialize() {
         let mut record: TouristBeacon = result?;
@@ -77,7 +77,7 @@ async fn generate_beacon_json() -> Result<(), Box<dyn std::error::Error>> {
         beacons.push(record);
     }
 
-    let json_output = serde_json::to_string_pretty(&beacons)?;
+    let json_output: String = serde_json::to_string_pretty(&beacons)?;
     fs::write(LOCAL_TOURIST_BEACON_JSON, json_output).await?;
     Ok(())
 }
