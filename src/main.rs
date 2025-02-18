@@ -48,6 +48,7 @@ async fn load_images() -> Result<HashMap<String, String>, Box<dyn std::error::Er
     let mut rdr = ReaderBuilder::new()
         .has_headers(false)
         .from_path(LOCAL_TOURIST_BEACON_IMGS_CSV)?;
+
     let mut images = HashMap::new();
 
     for result in rdr.deserialize() {
@@ -61,6 +62,7 @@ async fn generate_beacon_json() -> Result<(), Box<dyn std::error::Error>> {
     let mut rdr = ReaderBuilder::new()
         .has_headers(true)
         .from_path(LOCAL_TOURIST_BEACON_CSV)?;
+
     let images = load_images().await?;
     let now = chrono::Utc::now().to_rfc3339();
     let mut beacons = Vec::new();
