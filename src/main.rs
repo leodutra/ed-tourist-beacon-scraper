@@ -16,9 +16,9 @@ const REMOTE_TOURIST_BEACON_IMGS_CSV: &str = "https://docs.google.com/spreadshee
 
 const LOCAL_TOURIST_BEACON_XLSX: &str = "./tmp/tourist-beacon.xlsx";
 const LOCAL_TOURIST_BEACON_CSV: &str = "./tmp/tourist-beacon.csv";
-const LOCAL_TOURIST_BEACON_JSON: &str = "./tmp/tourist-beacon.json";
+const LOCAL_TOURIST_BEACON_JSON: &str = "./tmp/tourist-beacon.ndjson";
 const LOCAL_TOURIST_BEACON_IMGS_CSV: &str = "./tmp/tourist-beacon-images.csv";
-const LOCAL_TOURIST_BEACON_IMGS_JSON: &str = "./tmp/tourist-beacon-images.json";
+const LOCAL_TOURIST_BEACON_IMGS_JSON: &str = "./tmp/tourist-beacon-images.ndjson";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Beacon {
@@ -78,11 +78,15 @@ async fn load_images() -> Result<HashMap<String, Image>, Box<dyn std::error::Err
         images.insert(image.name.clone(), image);
     }
 
-    let json = serde_json::to_string_pretty(&images.values().collect::<Vec<_>>())?;
+    // Write NDJSON file for images
     let mut file = File::create(LOCAL_TOURIST_BEACON_IMGS_JSON)?;
-    file.write_all(json.as_bytes())?;
+    for image in images.values() {
+        let line = serde_json::to_string(&image)?;
+        file.write_all(line.as_bytes())?;
+        file.write_all(b"\n")?;
+    }
 
-    println!("Images JSON saved.");
+    println!("Images NDJSON saved.");
     Ok(images)
 }
 
@@ -114,11 +118,15 @@ async fn generate_beacon_json(
         }
     }
 
-    let json = serde_json::to_string_pretty(&beacons)?;
+    // Write NDJSON file
     let mut file = File::create(LOCAL_TOURIST_BEACON_JSON)?;
-    file.write_all(json.as_bytes())?;
+    for beacon in beacons {
+        let line = serde_json::to_string(&beacon)?;
+        file.write_all(line.as_bytes())?;
+        file.write_all(b"\n")?;
+    }
 
-    println!("Beacons JSON saved.");
+    println!("Beacons NDJSON saved.");
     Ok(())
 }
 
