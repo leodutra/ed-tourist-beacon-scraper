@@ -1,21 +1,27 @@
-use csv::{Reader, ReaderBuilder};
-use reqwest::{Client, Response};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{create_dir_all, File};
 use std::io::Write;
-use tokio::fs;
+use tokio::fs::File as AsyncFile;
+use tokio::io::{AsyncWriteExt, BufWriter};
+use reqwest::Client;
+use csv::{ReaderBuilder, StringRecord};
+use serde::{Deserialize, Serialize};
+use tokio_util::io::StreamReader;
+use futures_util::StreamExt;
 
 const TEMP_DIR: &str = "./tmp";
+const REMOTE_TOURIST_BEACON_XLSX: &str = "https://docs.google.com/spreadsheets/d/1eu30UyjpQrWexAglwD1Ax_GaDz4d7l8KD76kSzX4DEk/export?format=xlsx";
 const REMOTE_TOURIST_BEACON_CSV: &str = "https://docs.google.com/spreadsheets/d/1eu30UyjpQrWexAglwD1Ax_GaDz4d7l8KD76kSzX4DEk/gviz/tq?tqx=out:csv&sheet=Beacons&range=A3:ZZ";
 const REMOTE_TOURIST_BEACON_IMGS_CSV: &str = "https://docs.google.com/spreadsheets/d/1eu30UyjpQrWexAglwD1Ax_GaDz4d7l8KD76kSzX4DEk/gviz/tq?tqx=out:csv&sheet=ImgLookup&range=A:Z";
 
+const LOCAL_TOURIST_BEACON_XLSX: &str = "./tmp/tourist-beacon.xlsx";
 const LOCAL_TOURIST_BEACON_CSV: &str = "./tmp/tourist-beacon.csv";
 const LOCAL_TOURIST_BEACON_JSON: &str = "./tmp/tourist-beacon.json";
 const LOCAL_TOURIST_BEACON_IMGS_CSV: &str = "./tmp/tourist-beacon-images.csv";
+const LOCAL_TOURIST_BEACON_IMGS_JSON: &str = "./tmp/tourist-beacon-images.json";
 
-#[derive(Debug, Deserialize, Serialize)]
-struct TouristBeacon {
+#[derive(Debug, Serialize, Deserialize)]
+struct Beacon {
     uuid: String,
     number: String,
     site_name: String,
@@ -24,76 +30,114 @@ struct TouristBeacon {
     beacon_type: String,
     series: String,
     set: String,
-    images: Vec<String>,
+    images: Vec<Image>,
     captured_at: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-struct ImageEntry {
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct Image {
     id: String,
     name: String,
     src: String,
 }
 
 async fn download_file(url: &str, local_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let client: Client = Client::new();
-    let response: Response = client.get(url).send().await?;
-    let bytes = response.bytes().await?;
-    let mut file: File = File::create(local_path)?;
-    file.write_all(&bytes)?;
+    let client = Client::new();
+    let response = client.get(url).send().await?;
+    let stream = futures_util::stream::once(response.bytes()).map(|result| result.map_err(std::io::Error::other));
+
+    let file = AsyncFile::create(local_path).await?;
+    let mut writer = BufWriter::new(file);
+
+    let mut reader = Box::pin(StreamReader::new(stream.map(|result| result.map_err(std::io::Error::other))));
+
+    tokio::io::copy(&mut reader, &mut writer).await?;
+    writer.flush().await?;
+
+    println!("Downloaded: {}", local_path);
     Ok(())
 }
 
-async fn load_images() -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
-    let mut rdr: Reader<File> = ReaderBuilder::new()
-        .has_headers(false)
-        .from_path(LOCAL_TOURIST_BEACON_IMGS_CSV)?;
+async fn load_images() -> Result<HashMap<String, Image>, Box<dyn std::error::Error>> {
+    let mut reader = ReaderBuilder::new().has_headers(false).from_path(LOCAL_TOURIST_BEACON_IMGS_CSV)?;
+    let mut images = HashMap::new();
 
-    let mut images: HashMap<String, String> = HashMap::new();
-
-    for result in rdr.deserialize() {
-        let record: ImageEntry = result?;
-        images.insert(record.name.to_uppercase(), record.src);
+    for result in reader.records() {
+        let record = result?;
+        let image = Image {
+            id: record[0].to_string(),
+            name: record[1].to_uppercase(),
+            src: record[2].to_string(),
+        };
+        images.insert(image.name.clone(), image);
     }
+
+    let json = serde_json::to_string_pretty(&images.values().collect::<Vec<_>>())?;
+    let mut file = File::create(LOCAL_TOURIST_BEACON_IMGS_JSON)?;
+    file.write_all(json.as_bytes())?;
+
+    println!("Images JSON saved.");
     Ok(images)
 }
 
-async fn generate_beacon_json() -> Result<(), Box<dyn std::error::Error>> {
-    let mut rdr: Reader<File> = ReaderBuilder::new()
-        .has_headers(true)
-        .from_path(LOCAL_TOURIST_BEACON_CSV)?;
+async fn generate_beacon_json(images: HashMap<String, Image>) -> Result<(), Box<dyn std::error::Error>> {
+    let mut reader = ReaderBuilder::new().has_headers(true).from_path(LOCAL_TOURIST_BEACON_CSV)?;
+    let mut beacons = Vec::new();
+    let now = chrono::Utc::now().to_rfc3339();
 
-    let images: HashMap<String, String> = load_images().await?;
-    let now: String = chrono::Utc::now().to_rfc3339();
-    let mut beacons: Vec<TouristBeacon> = Vec::new();
-
-    for result in rdr.deserialize() {
-        let mut record: TouristBeacon = result?;
-        record.images = vec![images
-            .get(&record.site_name.to_uppercase())
-            .cloned()
-            .unwrap_or_default()];
-        record.captured_at = now.clone();
-        beacons.push(record);
+    for result in reader.records() {
+        let record = result?;
+        let beacon = Beacon {
+            uuid: record[0].to_string(),
+            number: record[1].to_string(),
+            site_name: record[2].to_string(),
+            system: record[3].to_string(),
+            distance: record[4].to_string(),
+            beacon_type: record[5].to_string(),
+            series: record[6].to_string(),
+            set: record[7].to_string(),
+            images: resolve_images(&record, &images),
+            captured_at: now.clone(),
+        };
+        beacons.push(beacon);
     }
 
-    let json_output: String = serde_json::to_string_pretty(&beacons)?;
-    fs::write(LOCAL_TOURIST_BEACON_JSON, json_output).await?;
+    let json = serde_json::to_string_pretty(&beacons)?;
+    let mut file = File::create(LOCAL_TOURIST_BEACON_JSON)?;
+    file.write_all(json.as_bytes())?;
+
+    println!("Beacons JSON saved.");
     Ok(())
+}
+
+fn resolve_images(record: &StringRecord, images: &HashMap<String, Image>) -> Vec<Image> {
+    let image_fields = vec![8, 9, 10, 11, 12]; // Colunas das imagens
+    let mut image_list = Vec::new();
+
+    for &index in &image_fields {
+        if let Some(name) = record.get(index) {
+            if let Some(image) = images.get(&name.to_uppercase()) {
+                image_list.push(image.clone());
+            }
+        }
+    }
+    image_list
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     create_dir_all(TEMP_DIR)?;
 
-    download_file(REMOTE_TOURIST_BEACON_CSV, LOCAL_TOURIST_BEACON_CSV).await?;
-    download_file(
-        REMOTE_TOURIST_BEACON_IMGS_CSV,
-        LOCAL_TOURIST_BEACON_IMGS_CSV,
-    )
-    .await?;
-    generate_beacon_json().await?;
+    let downloads = vec![
+        download_file(REMOTE_TOURIST_BEACON_XLSX, LOCAL_TOURIST_BEACON_XLSX),
+        download_file(REMOTE_TOURIST_BEACON_CSV, LOCAL_TOURIST_BEACON_CSV),
+        download_file(REMOTE_TOURIST_BEACON_IMGS_CSV, LOCAL_TOURIST_BEACON_IMGS_CSV),
+    ];
 
-    println!("Files downloaded and JSON generated successfully.");
+    futures_util::future::join_all(downloads).await;
+
+    let images = load_images().await?;
+    generate_beacon_json(images).await?;
+
     Ok(())
 }
