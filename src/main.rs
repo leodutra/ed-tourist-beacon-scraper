@@ -16,9 +16,9 @@ const REMOTE_TOURIST_BEACON_IMGS_CSV: &str = "https://docs.google.com/spreadshee
 
 const LOCAL_TOURIST_BEACON_XLSX: &str = "./tmp/tourist-beacon.xlsx";
 const LOCAL_TOURIST_BEACON_CSV: &str = "./tmp/tourist-beacon.csv";
-const LOCAL_TOURIST_BEACON_JSON: &str = "./tmp/tourist-beacon.ndjson";
+const LOCAL_TOURIST_BEACON_JSON: &str = "./tmp/tourist-beacon.jsonl";
 const LOCAL_TOURIST_BEACON_IMGS_CSV: &str = "./tmp/tourist-beacon-images.csv";
-const LOCAL_TOURIST_BEACON_IMGS_JSON: &str = "./tmp/tourist-beacon-images.ndjson";
+const LOCAL_TOURIST_BEACON_IMGS_JSON: &str = "./tmp/tourist-beacon-images.jsonl";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Beacon {
@@ -32,6 +32,7 @@ struct Beacon {
     set: String,
     images: Vec<Image>,
     captured_at: String,
+    text: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -78,7 +79,7 @@ async fn load_images() -> Result<HashMap<String, Image>, Box<dyn std::error::Err
         images.insert(image.name.clone(), image);
     }
 
-    // Write NDJSON file for images
+    // Write JSONL file for images
     let mut file = File::create(LOCAL_TOURIST_BEACON_IMGS_JSON)?;
     for image in images.values() {
         let line = serde_json::to_string(&image)?;
@@ -86,7 +87,7 @@ async fn load_images() -> Result<HashMap<String, Image>, Box<dyn std::error::Err
         file.write_all(b"\n")?;
     }
 
-    println!("Images NDJSON saved.");
+    println!("Images JSONL saved.");
     Ok(images)
 }
 
@@ -112,13 +113,14 @@ async fn generate_beacon_json(
                 series: record[6].to_string(),
                 set: record[7].to_string(),
                 images: resolve_images(&record, &images),
+                text: record[14].to_string(),
                 captured_at: now.clone(),
             };
             beacons.push(beacon);
         }
     }
 
-    // Write NDJSON file
+    // Write JSONL file
     let mut file = File::create(LOCAL_TOURIST_BEACON_JSON)?;
     for beacon in beacons {
         let line = serde_json::to_string(&beacon)?;
@@ -126,7 +128,7 @@ async fn generate_beacon_json(
         file.write_all(b"\n")?;
     }
 
-    println!("Beacons NDJSON saved.");
+    println!("Beacons JSONL saved.");
     Ok(())
 }
 
