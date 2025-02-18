@@ -1,13 +1,13 @@
+use csv::{ReaderBuilder, StringRecord};
+use futures_util::StreamExt;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{create_dir_all, File};
 use std::io::Write;
 use tokio::fs::File as AsyncFile;
 use tokio::io::{AsyncWriteExt, BufWriter};
-use reqwest::Client;
-use csv::{ReaderBuilder, StringRecord};
-use serde::{Deserialize, Serialize};
 use tokio_util::io::StreamReader;
-use futures_util::StreamExt;
 
 const TEMP_DIR: &str = "./tmp";
 const REMOTE_TOURIST_BEACON_XLSX: &str = "https://docs.google.com/spreadsheets/d/1eu30UyjpQrWexAglwD1Ax_GaDz4d7l8KD76kSzX4DEk/export?format=xlsx";
@@ -44,12 +44,15 @@ struct Image {
 async fn download_file(url: &str, local_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::new();
     let response = client.get(url).send().await?;
-    let stream = futures_util::stream::once(response.bytes()).map(|result| result.map_err(std::io::Error::other));
+    let stream = futures_util::stream::once(response.bytes())
+        .map(|result| result.map_err(std::io::Error::other));
 
     let file = AsyncFile::create(local_path).await?;
     let mut writer = BufWriter::new(file);
 
-    let mut reader = Box::pin(StreamReader::new(stream.map(|result| result.map_err(std::io::Error::other))));
+    let mut reader = Box::pin(StreamReader::new(
+        stream.map(|result| result.map_err(std::io::Error::other)),
+    ));
 
     tokio::io::copy(&mut reader, &mut writer).await?;
     writer.flush().await?;
@@ -59,7 +62,10 @@ async fn download_file(url: &str, local_path: &str) -> Result<(), Box<dyn std::e
 }
 
 async fn load_images() -> Result<HashMap<String, Image>, Box<dyn std::error::Error>> {
-    let mut reader = ReaderBuilder::new().has_headers(false).from_path(LOCAL_TOURIST_BEACON_IMGS_CSV)?;
+    let mut reader = ReaderBuilder::new()
+        .has_headers(false)
+        .from_path(LOCAL_TOURIST_BEACON_IMGS_CSV)?;
+
     let mut images = HashMap::new();
 
     for result in reader.records() {
@@ -80,26 +86,32 @@ async fn load_images() -> Result<HashMap<String, Image>, Box<dyn std::error::Err
     Ok(images)
 }
 
-async fn generate_beacon_json(images: HashMap<String, Image>) -> Result<(), Box<dyn std::error::Error>> {
-    let mut reader = ReaderBuilder::new().has_headers(true).from_path(LOCAL_TOURIST_BEACON_CSV)?;
+async fn generate_beacon_json(
+    images: HashMap<String, Image>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut reader = ReaderBuilder::new()
+        .has_headers(true)
+        .from_path(LOCAL_TOURIST_BEACON_CSV)?;
     let mut beacons = Vec::new();
     let now = chrono::Utc::now().to_rfc3339();
 
     for result in reader.records() {
         let record = result?;
-        let beacon = Beacon {
-            uuid: record[0].to_string(),
-            number: record[1].to_string(),
-            site_name: record[2].to_string(),
-            system: record[3].to_string(),
-            distance: record[4].to_string(),
-            beacon_type: record[5].to_string(),
-            series: record[6].to_string(),
-            set: record[7].to_string(),
-            images: resolve_images(&record, &images),
-            captured_at: now.clone(),
-        };
-        beacons.push(beacon);
+        if !record[0].is_empty() {
+            let beacon = Beacon {
+                uuid: record[0].to_string(),
+                number: record[1].to_string(),
+                site_name: record[2].to_string(),
+                system: record[3].to_string(),
+                distance: record[4].to_string(),
+                beacon_type: record[5].to_string(),
+                series: record[6].to_string(),
+                set: record[7].to_string(),
+                images: resolve_images(&record, &images),
+                captured_at: now.clone(),
+            };
+            beacons.push(beacon);
+        }
     }
 
     let json = serde_json::to_string_pretty(&beacons)?;
@@ -131,7 +143,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let downloads = vec![
         download_file(REMOTE_TOURIST_BEACON_XLSX, LOCAL_TOURIST_BEACON_XLSX),
         download_file(REMOTE_TOURIST_BEACON_CSV, LOCAL_TOURIST_BEACON_CSV),
-        download_file(REMOTE_TOURIST_BEACON_IMGS_CSV, LOCAL_TOURIST_BEACON_IMGS_CSV),
+        download_file(
+            REMOTE_TOURIST_BEACON_IMGS_CSV,
+            LOCAL_TOURIST_BEACON_IMGS_CSV,
+        ),
     ];
 
     futures_util::future::join_all(downloads).await;
