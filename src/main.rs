@@ -16,7 +16,7 @@ const REMOTE_TOURIST_BEACON_IMGS_CSV: &str = "https://docs.google.com/spreadshee
 
 const LOCAL_TOURIST_BEACON_XLSX: &str = "./tmp/tourist-beacon.xlsx";
 const LOCAL_TOURIST_BEACON_CSV: &str = "./tmp/tourist-beacon.csv";
-const LOCAL_TOURIST_BEACON_JSON: &str = "./tmp/tourist-beacon.jsonl";
+const LOCAL_TOURIST_BEACON_JSONL: &str = "./tmp/tourist-beacon.jsonl";
 const LOCAL_TOURIST_BEACON_IMGS_CSV: &str = "./tmp/tourist-beacon-images.csv";
 const LOCAL_TOURIST_BEACON_IMGS_JSON: &str = "./tmp/tourist-beacon-images.jsonl";
 
@@ -121,7 +121,7 @@ async fn generate_beacon_json(
     }
 
     // Write JSONL file
-    let mut file = File::create(LOCAL_TOURIST_BEACON_JSON)?;
+    let mut file = File::create(LOCAL_TOURIST_BEACON_JSONL)?;
     for beacon in beacons {
         let line = serde_json::to_string(&beacon)?;
         file.write_all(line.as_bytes())?;
